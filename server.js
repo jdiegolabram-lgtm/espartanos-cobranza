@@ -1,64 +1,49 @@
-const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
+'use strict'
 
-const app = express();
-app.use(express.json());
+/**
+ * SERVIDOR PRINCIPAL — ESPARTANOS COBRANZA
+ * Stack: Fastify + Supabase
+ */
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
+const Fastify = require('fastify')
 
-app.get('/', (req, res) => {
-  res.send('Sistema de cobranza funcionando 🚀');
-});
+const app = Fastify({
+  logger: {
+    transport: process.env.NODE_ENV !== 'production'
+      ? { target: 'pino-pretty', options: { colorize: true } }
+      : undefined,
+  },
+})
 
-app.get('/clientes', async (req, res) => {
+// ── Plugins ──
+app.register(require('@fastify/cors'), {
+  origin: process.env.CORS_ORIGIN || true,
+})
+
+// ── Rutas ──
+app.register(require('./src/routes/jornadas'), { prefix: '/api/jornadas' })
+app.register(require('./src/routes/cuentas'),  { prefix: '/api/cuentas'  })
+
+// ── Health check ──
+app.get('/', async () => ({
+  sistema:  'Espartanos Cobranza — Motor de Ruteo Inteligente',
+  version:  '1.0.0',
+  estado:   'activo',
+  timestamp: new Date().toISOString(),
+}))
+
+app.get('/health', async () => ({ ok: true }))
+
+// ── Arranque ──
+const start = async () => {
   try {
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('fecha_registro', { ascending: false });
-
-    if (error) {
-      return res.status(500).json({
-        error: error.message,
-        details: error,
-        supabaseUrlLoaded: !!process.env.SUPABASE_URL,
-        supabaseKeyLoaded: !!process.env.SUPABASE_KEY,
-        supabaseUrlValue: process.env.SUPABASE_URL || null
-      });
-    }
-
-    return res.json(data);
-  } catch (e) {
-    return res.status(500).json({
-      error: e.message,
-      name: e.name,
-      stack: e.stack,
-      supabaseUrlLoaded: !!process.env.SUPABASE_URL,
-      supabaseKeyLoaded: !!process.env.SUPABASE_KEY,
-      supabaseUrlValue: process.env.SUPABASE_URL || null
-    });
+    const port = parseInt(process.env.PORT || '3000', 10)
+    await app.listen({ port, host: '0.0.0.0' })
+    app.log.info(`Motor de ruteo activo en puerto ${port}`)
+  } catch (err) {
+    app.log.error(err)
+    process.exit(1)
   }
-});
+}
 
-app.post('/clientes', async (req, res) => {
-  const { nombre, telefono, direccion, deuda } = req.body;
-
-  const { data, error } = await supabase
-    .from('clientes')
-    .insert([{ nombre, telefono, direccion, deuda }])
-    .select();
-
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
-
-  res.status(201).json(data);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
+start()
