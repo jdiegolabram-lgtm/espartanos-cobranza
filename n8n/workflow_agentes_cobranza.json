@@ -1,0 +1,139 @@
+{
+  "name": "Agentes IA Cobranza WhatsApp — Espartanos QRO",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-cobranza",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "name": "Webhook Cobranza",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "ai-cobranza"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===========================================================\n// NODO 1: CODE ROUTER\n// Selecciona el agente correcto seg\u00fan bucket y fase.\n// Construye el prompt para Gemini.\n// ===========================================================\n\n// Soporta tanto body anidado (n8n webhook default) como payload directo\nconst datos = $input.first().json.body || $input.first().json;\n\nconst bucket          = datos.bucket          || '1-7';\nconst fase            = datos.fase            || 'apertura';\nconst nombre          = datos.nombre_cliente  || 'cliente';\nconst pagos           = datos.pagos_vencidos  || 1;\nconst monto           = datos.monto_pago      || 0;\nconst saldo_vencido   = datos.saldo_vencido   || 0;\nconst ultima_gestion  = datos.ultima_gestion  || 'Sin gesti\u00f3n previa';\nconst telefono        = datos.telefono        || '';\n\n// \u2500\u2500 Prompts de sistema por tipo de agente \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nconst PROMPTS_SISTEMA = {\n\n  empatico:\n    `Eres un agente de cobranza emp\u00e1tico y profesional de Libertad Financiera.\\n     Tu objetivo es recuperar el pago sin agredir al cliente.\\n     Usa lenguaje claro, humano y orientado a soluci\u00f3n.\\n     Invita a regularizar hoy de forma amable.\\n     No uses amenazas ni lenguaje agresivo.\\n     Responde \u00daNICAMENTE con el mensaje de WhatsApp, sin comillas, sin explicaciones.`,\n\n  firme:\n    `Eres un agente de cobranza firme, directo y profesional de Libertad Financiera.\\n     Tu objetivo es obtener pago o compromiso concreto hoy.\\n     S\u00e9 claro con el atraso, el monto y la urgencia de regularizar.\\n     Tono serio y respetuoso. Sin insultos ni amenazas ilegales.\\n     Responde \u00daNICAMENTE con el mensaje de WhatsApp, sin comillas, sin explicaciones.`,\n\n  conciliador:\n    `Eres un agente conciliador de cobranza de Libertad Financiera.\\n     Busca una salida viable: pago total, pago parcial o fecha exacta de dep\u00f3sito.\\n     Tono profesional, orientado a negociaci\u00f3n y acuerdo.\\n     Responde \u00daNICAMENTE con el mensaje de WhatsApp, sin comillas, sin explicaciones.`,\n\n  cierre:\n    `Eres un agente de cierre de cobranza de Libertad Financiera.\\n     Acci\u00f3n concreta: pago hoy, transferencia o fecha y hora exacta.\\n     M\u00e1ximo 4 l\u00edneas. Sin saludos largos. Sin rodeos.\\n     Responde \u00daNICAMENTE con el mensaje de WhatsApp, sin comillas, sin explicaciones.`\n};\n\n// \u2500\u2500 Selecci\u00f3n de agente \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n// Regla 1: Si fase es 'cierre' \u2192 siempre Agente Cierre\n// Regla 2: Bucket 61-90 / 91-120 \u2192 Conciliador\n// Regla 3: Bucket 31-60 \u2192 Firme\n// Default: Emp\u00e1tico (0, 1-7, 8-15, 16-30)\nlet agente = 'empatico';\nif (fase === 'cierre') {\n  agente = 'cierre';\n} else if (['61-90', '91-120'].includes(bucket)) {\n  agente = 'conciliador';\n} else if (bucket === '31-60') {\n  agente = 'firme';\n}\n\n// \u2500\u2500 Contexto de la cuenta \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nconst contexto_cuenta =\n  `Genera un mensaje de WhatsApp de cobranza para ${nombre}.\\n` +\n  `Situaci\u00f3n: ${pagos} pago(s) vencido(s) | Monto de pago: $${monto} MXN | ` +\n  `Saldo vencido: $${saldo_vencido} MXN | Bucket: ${bucket} d\u00edas | Fase: ${fase}.\\n` +\n  `\u00daltima gesti\u00f3n registrada: \"${ultima_gestion}\".\\n` +\n  `El mensaje debe estar en espa\u00f1ol mexicano, ser profesional, m\u00e1ximo 5 l\u00edneas, ` +\n  `y solicitar una acci\u00f3n concreta hoy (pago, transferencia o fecha exacta).`;\n\n// \u2500\u2500 Output \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nreturn [{\n  json: {\n    ...datos,\n    agente_seleccionado: agente,\n    gemini_body: {\n      contents: [{\n        parts: [{\n          text: PROMPTS_SISTEMA[agente] + '\\n\\n' + contexto_cuenta\n        }]\n      }],\n      generationConfig: {\n        temperature: 0.7,\n        maxOutputTokens: 300\n      }\n    }\n  }\n}];"
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-111111111111",
+      "name": "Code Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=TU_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.gemini_body) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-222222222222",
+      "name": "Gemini Genera Mensaje",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===========================================================\n// NODO 2: CODE NORMALIZER\n// Extrae el texto de Gemini y recupera datos del Code Router.\n// ===========================================================\n\nconst gemini   = $input.first().json;\nconst original = $('Code Router').first().json;\n\nlet mensaje_ia = '';\ntry {\n  mensaje_ia =\n    gemini.candidates?.[0]?.content?.parts?.[0]?.text ||\n    gemini.text ||\n    gemini.response ||\n    gemini.output_text ||\n    JSON.stringify(gemini);\n} catch (e) {\n  mensaje_ia = 'Error al procesar respuesta de IA: ' + e.message;\n}\n\nmensaje_ia = mensaje_ia.trim();\n\n// Limpiar comillas envolventes que Gemini a veces a\u00f1ade\nif (mensaje_ia.startsWith('\"') && mensaje_ia.endsWith('\"')) {\n  mensaje_ia = mensaje_ia.slice(1, -1).trim();\n}\n\n// Formato internacional de tel\u00e9fono (+52 M\u00e9xico)\nlet telefono = String(original.telefono || '').replace(/\\D/g, '');\nif (!telefono.startsWith('52') && telefono.length === 10) {\n  telefono = '52' + telefono;\n}\n\nreturn [{\n  json: {\n    status: 'ok',\n    mensaje_ia,\n    telefono,\n    agente_seleccionado: original.agente_seleccionado,\n    cliente_id:          original.cliente_id      || null,\n    nombre_cliente:      original.nombre_cliente  || 'cliente',\n    bucket:              original.bucket          || null,\n    fase:                original.fase            || null,\n    origen: 'gemini-espartanos'\n  }\n}];"
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-333333333333",
+      "name": "Code Normalizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v22.0/1111516238701437/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer TU_WHATSAPP_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.telefono, type: 'text', text: { body: $json.mensaje_ia } }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "d4e5f6a7-b8c9-0123-defa-444444444444",
+      "name": "WhatsApp Enviar Mensaje",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1280, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status:           $('Code Normalizer').first().json.status,\n  mensaje_ia:       $('Code Normalizer').first().json.mensaje_ia,\n  agente:           $('Code Normalizer').first().json.agente_seleccionado,\n  cliente_id:       $('Code Normalizer').first().json.cliente_id,\n  nombre_cliente:   $('Code Normalizer').first().json.nombre_cliente,\n  whatsapp_enviado: true,\n  origen:           $('Code Normalizer').first().json.origen\n}) }}",
+        "options": {}
+      },
+      "id": "e5f6a7b8-c9d0-1234-efab-555555555555",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1540, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Cobranza": {
+      "main": [[{ "node": "Code Router", "type": "main", "index": 0 }]]
+    },
+    "Code Router": {
+      "main": [[{ "node": "Gemini Genera Mensaje", "type": "main", "index": 0 }]]
+    },
+    "Gemini Genera Mensaje": {
+      "main": [[{ "node": "Code Normalizer", "type": "main", "index": 0 }]]
+    },
+    "Code Normalizer": {
+      "main": [[{ "node": "WhatsApp Enviar Mensaje", "type": "main", "index": 0 }]]
+    },
+    "WhatsApp Enviar Mensaje": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "espartanos-qro"
+  },
+  "tags": [
+    { "name": "cobranza" },
+    { "name": "whatsapp" },
+    { "name": "espartanos" }
+  ]
+}
