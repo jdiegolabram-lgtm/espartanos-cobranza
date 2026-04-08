@@ -4,17 +4,17 @@
   "description": "Motor de ruteo inteligente para cobranza en campo — Espartanos QRO",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node --env-file=.env server.js",
+    "dev": "node --env-file=.env --watch server.js"
   },
   "dependencies": {
-    "@fastify/cors": "^8.5.0",
+    "@fastify/cors": "^10.1.0",
     "@googlemaps/google-maps-services-js": "^3.4.0",
     "@supabase/supabase-js": "^2.56.0",
-    "fastify": "^4.28.1",
+    "fastify": "^5.8.4",
     "pino-pretty": "^11.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }
