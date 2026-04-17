@@ -1,0 +1,155 @@
+{
+  "name": "L.I.N.D.A. — Entrada WhatsApp (Meta)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-linda",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-entrada",
+      "name": "Webhook Meta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "whatsapp-linda"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────\n// Verificación del webhook de Meta (GET) + extracción\n// de mensajes entrantes (POST)\n// ─────────────────────────────────────────────────\nconst body = $input.first().json.body || $input.first().json;\nconst query = $input.first().json.query || {};\n\n// Meta envía GET para verificar el webhook\nif ($input.first().json.headers?.['x-hub-signature-256'] === undefined && query['hub.challenge']) {\n  return [{ json: { _verificacion: true, challenge: query['hub.challenge'] } }];\n}\n\n// Extraer mensaje del payload de WhatsApp Cloud API\nconst entry   = body.entry?.[0];\nconst changes = entry?.changes?.[0]?.value;\nconst message = changes?.messages?.[0];\n\nif (!message || message.type !== 'text') {\n  return [{ json: { _ignorar: true } }];\n}\n\nconst telefono = message.from; // e.g. \"524421234567\"\nconst texto    = message.text?.body || '';\nconst wa_id    = message.id;\n\nreturn [{\n  json: {\n    telefono,\n    mensaje: texto,\n    canal:   'whatsapp',\n    wa_id,\n    _ignorar: false,\n    _verificacion: false,\n  }\n}];"
+      },
+      "id": "node-extraer-mensaje",
+      "name": "Extraer Mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "leftValue": "={{ $json._ignorar }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json._verificacion }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-filtrar",
+      "name": "¿Es mensaje real?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/agent/process",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ telefono: $json.telefono, mensaje: $json.mensaje, canal: 'whatsapp' }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "node-llamar-linda",
+      "name": "Llamar L.I.N.D.A.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara el body para WhatsApp Cloud API\nconst lindaReply = $input.first().json.reply || 'En este momento no podemos atenderte. Intenta más tarde.';\nconst telefono   = $('Extraer Mensaje').first().json.telefono;\n\n// Normalizar teléfono (quitar +)\nconst to = String(telefono).replace('+', '');\n\nreturn [{ json: { to, mensaje: lindaReply } }];"
+      },
+      "id": "node-preparar-respuesta",
+      "name": "Preparar Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.WHATSAPP_TOKEN }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.to, type: 'text', text: { body: $json.mensaje } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "node-enviar-whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "node-responder-meta",
+      "name": "Responder 200 a Meta",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1640, 240]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, challenge: $json.challenge }) }}",
+        "options": {}
+      },
+      "id": "node-verificar-meta",
+      "name": "Responder Verificación",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [920, 440]
+    }
+  ],
+  "connections": {
+    "Webhook Meta":        { "main": [[{ "node": "Extraer Mensaje",       "type": "main", "index": 0 }]] },
+    "Extraer Mensaje":     { "main": [[{ "node": "¿Es mensaje real?",     "type": "main", "index": 0 }]] },
+    "¿Es mensaje real?": {
+      "main": [
+        [{ "node": "Llamar L.I.N.D.A.",      "type": "main", "index": 0 }],
+        [{ "node": "Responder Verificación",  "type": "main", "index": 0 }]
+      ]
+    },
+    "Llamar L.I.N.D.A.":   { "main": [[{ "node": "Preparar Respuesta",   "type": "main", "index": 0 }]] },
+    "Preparar Respuesta":  { "main": [[{ "node": "Enviar WhatsApp",       "type": "main", "index": 0 }]] },
+    "Enviar WhatsApp":     { "main": [[{ "node": "Responder 200 a Meta",  "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "espartanos-qro"
+  },
+  "tags": [
+    { "name": "LINDA" },
+    { "name": "whatsapp" },
+    { "name": "cobranza" }
+  ]
+}

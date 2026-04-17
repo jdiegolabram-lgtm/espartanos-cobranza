@@ -1,0 +1,123 @@
+{
+  "name": "L.I.N.D.A. — Seguimientos Automáticos (Cron Diario)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1-6" }]
+        }
+      },
+      "id": "node-cron",
+      "name": "Cron 9am Lun-Sab",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/seguimientos/pendientes",
+        "options": { "timeout": 15000 }
+      },
+      "id": "node-obtener-seguimientos",
+      "name": "Obtener Seguimientos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convierte el array de seguimientos en items individuales\nconst seguimientos = $input.first().json.seguimientos || [];\nreturn seguimientos.map(s => ({ json: s }));"
+      },
+      "id": "node-split",
+      "name": "Split Seguimientos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/agent/process",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\n  telefono: $json.cuenta.telefono,\n  mensaje: 'recordatorio_automatico_seguimiento',\n  canal: $json.canal || 'whatsapp'\n}) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "node-llamar-linda",
+      "name": "Llamar L.I.N.D.A.",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara mensaje de WhatsApp\nconst reply    = $input.first().json.reply || '';\nconst telefono = $('Split Seguimientos').first().json.cuenta.telefono;\nconst segId    = $('Split Seguimientos').first().json.id;\n\nconst to = String(telefono).replace(/\\D/g, '');\nconst toE164 = to.startsWith('52') ? to : '52' + to;\n\nreturn [{ json: { to: toE164, mensaje: reply, seguimiento_id: segId } }];"
+      },
+      "id": "node-preparar-ws",
+      "name": "Preparar WhatsApp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v22.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.WHATSAPP_TOKEN }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.to, type: 'text', text: { body: $json.mensaje } }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "node-enviar-ws",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_URL }}/api/seguimientos/{{ $('Preparar WhatsApp').first().json.seguimiento_id }}/completar",
+        "options": { "timeout": 10000 }
+      },
+      "id": "node-marcar-completado",
+      "name": "Marcar Completado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 300]
+    }
+  ],
+  "connections": {
+    "Cron 9am Lun-Sab":    { "main": [[{ "node": "Obtener Seguimientos", "type": "main", "index": 0 }]] },
+    "Obtener Seguimientos": { "main": [[{ "node": "Split Seguimientos",   "type": "main", "index": 0 }]] },
+    "Split Seguimientos":   { "main": [[{ "node": "Llamar L.I.N.D.A.",    "type": "main", "index": 0 }]] },
+    "Llamar L.I.N.D.A.":   { "main": [[{ "node": "Preparar WhatsApp",    "type": "main", "index": 0 }]] },
+    "Preparar WhatsApp":   { "main": [[{ "node": "Enviar WhatsApp",      "type": "main", "index": 0 }]] },
+    "Enviar WhatsApp":     { "main": [[{ "node": "Marcar Completado",    "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "espartanos-qro"
+  },
+  "tags": [
+    { "name": "LINDA" },
+    { "name": "seguimientos" },
+    { "name": "cron" }
+  ]
+}
