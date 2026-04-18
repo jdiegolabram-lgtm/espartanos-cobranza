@@ -1,59 +1,89 @@
 {
-  "name": "L.I.N.D.A. — Entrada WhatsApp (Meta)",
+  "name": "L.I.N.D.A. \u2014 Entrada WhatsApp (Meta)",
   "nodes": [
     {
       "parameters": {
-        "httpMethod": "POST",
-        "path": "whatsapp-linda",
+        "httpMethod": "GET",
+        "path": "linda-whatsapp",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "node-webhook-entrada",
-      "name": "Webhook Meta",
+      "id": "node-webhook-get",
+      "name": "Webhook Verificaci\u00f3n GET",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [200, 300],
-      "webhookId": "whatsapp-linda"
+      "position": [200, 160],
+      "webhookId": "linda-whatsapp-get"
     },
     {
       "parameters": {
-        "jsCode": "// ─────────────────────────────────────────────────\n// Verificación del webhook de Meta (GET) + extracción\n// de mensajes entrantes (POST)\n// ─────────────────────────────────────────────────\nconst body = $input.first().json.body || $input.first().json;\nconst query = $input.first().json.query || {};\n\n// Meta envía GET para verificar el webhook\nif ($input.first().json.headers?.['x-hub-signature-256'] === undefined && query['hub.challenge']) {\n  return [{ json: { _verificacion: true, challenge: query['hub.challenge'] } }];\n}\n\n// Extraer mensaje del payload de WhatsApp Cloud API\nconst entry   = body.entry?.[0];\nconst changes = entry?.changes?.[0]?.value;\nconst message = changes?.messages?.[0];\n\nif (!message || message.type !== 'text') {\n  return [{ json: { _ignorar: true } }];\n}\n\nconst telefono = message.from; // e.g. \"524421234567\"\nconst texto    = message.text?.body || '';\nconst wa_id    = message.id;\n\nreturn [{\n  json: {\n    telefono,\n    mensaje: texto,\n    canal:   'whatsapp',\n    wa_id,\n    _ignorar: false,\n    _verificacion: false,\n  }\n}];"
+        "jsCode": "// Meta env\u00eda GET con hub.challenge en query params\n// En n8n los query params llegan directo en $json\nconst challenge   = $json['hub.challenge']   || $json.query?.['hub.challenge']   || '';\nconst verifyToken = $json['hub.verify_token'] || $json.query?.['hub.verify_token'] || '';\nconst VERIFY_TOKEN = 'espartanos2026';\n\nif (!challenge || verifyToken !== VERIFY_TOKEN) {\n  return [{ json: { _ok: false, error: 'token invalido o sin challenge' } }];\n}\n\nreturn [{ json: { _ok: true, challenge } }];"
+      },
+      "id": "node-extraer-challenge",
+      "name": "Extraer Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 160]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "node-respond-challenge",
+      "name": "Responder Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 160]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linda-whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-post",
+      "name": "Webhook Mensajes POST",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 380],
+      "webhookId": "linda-whatsapp-post"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrae mensaje entrante del payload de Meta WhatsApp\nconst body    = $json.body || $json;\nconst entry   = body.entry?.[0];\nconst changes = entry?.changes?.[0]?.value;\nconst message = changes?.messages?.[0];\n\nif (!message || message.type !== 'text') {\n  return [{ json: { _ignorar: true } }];\n}\n\nconst telefono = message.from;\nconst texto    = message.text?.body || '';\n\nreturn [{\n  json: {\n    telefono,\n    mensaje: texto,\n    canal: 'whatsapp',\n    wa_id: message.id,\n    _ignorar: false\n  }\n}];"
       },
       "id": "node-extraer-mensaje",
       "name": "Extraer Mensaje",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 300]
+      "position": [440, 380]
     },
     {
       "parameters": {
         "conditions": {
           "options": { "caseSensitive": false },
-          "conditions": [
-            {
-              "leftValue": "={{ $json._ignorar }}",
-              "rightValue": false,
-              "operator": { "type": "boolean", "operation": "equals" }
-            },
-            {
-              "leftValue": "={{ $json._verificacion }}",
-              "rightValue": false,
-              "operator": { "type": "boolean", "operation": "equals" }
-            }
-          ],
-          "combinator": "and"
+          "conditions": [{
+            "leftValue":  "={{ $json._ignorar }}",
+            "rightValue": false,
+            "operator":   { "type": "boolean", "operation": "equals" }
+          }]
         }
       },
       "id": "node-filtrar",
-      "name": "¿Es mensaje real?",
+      "name": "\u00bfEs mensaje real?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [680, 380]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.BACKEND_URL }}/agent/process",
+        "url":    "={{ $env.BACKEND_URL }}/agent/process",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [{ "name": "Content-Type", "value": "application/json" }]
@@ -68,22 +98,22 @@
       "name": "Llamar L.I.N.D.A.",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [920, 240]
+      "position": [920, 300]
     },
     {
       "parameters": {
-        "jsCode": "// Prepara el body para WhatsApp Cloud API\nconst lindaReply = $input.first().json.reply || 'En este momento no podemos atenderte. Intenta más tarde.';\nconst telefono   = $('Extraer Mensaje').first().json.telefono;\n\n// Normalizar teléfono (quitar +)\nconst to = String(telefono).replace('+', '');\n\nreturn [{ json: { to, mensaje: lindaReply } }];"
+        "jsCode": "const reply    = $input.first().json.reply || 'En este momento no podemos atenderte.';\nconst telefono = $('Extraer Mensaje').first().json.telefono;\nconst to = String(telefono).replace(/\\D/g, '');\nreturn [{ json: { to, mensaje: reply } }];"
       },
       "id": "node-preparar-respuesta",
       "name": "Preparar Respuesta",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1160, 240]
+      "position": [1160, 300]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://graph.facebook.com/v22.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "url":    "=https://graph.facebook.com/v18.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -101,7 +131,7 @@
       "name": "Enviar WhatsApp",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1400, 240]
+      "position": [1400, 300]
     },
     {
       "parameters": {
@@ -113,43 +143,25 @@
       "name": "Responder 200 a Meta",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [1640, 240]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, challenge: $json.challenge }) }}",
-        "options": {}
-      },
-      "id": "node-verificar-meta",
-      "name": "Responder Verificación",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [920, 440]
+      "position": [1640, 300]
     }
   ],
   "connections": {
-    "Webhook Meta":        { "main": [[{ "node": "Extraer Mensaje",       "type": "main", "index": 0 }]] },
-    "Extraer Mensaje":     { "main": [[{ "node": "¿Es mensaje real?",     "type": "main", "index": 0 }]] },
-    "¿Es mensaje real?": {
+    "Webhook Verificaci\u00f3n GET": { "main": [[{ "node": "Extraer Challenge",    "type": "main", "index": 0 }]] },
+    "Extraer Challenge":          { "main": [[{ "node": "Responder Challenge",   "type": "main", "index": 0 }]] },
+    "Webhook Mensajes POST":      { "main": [[{ "node": "Extraer Mensaje",       "type": "main", "index": 0 }]] },
+    "Extraer Mensaje":            { "main": [[{ "node": "\u00bfEs mensaje real?",   "type": "main", "index": 0 }]] },
+    "\u00bfEs mensaje real?": {
       "main": [
-        [{ "node": "Llamar L.I.N.D.A.",      "type": "main", "index": 0 }],
-        [{ "node": "Responder Verificación",  "type": "main", "index": 0 }]
+        [{ "node": "Llamar L.I.N.D.A.",    "type": "main", "index": 0 }],
+        [{ "node": "Responder 200 a Meta", "type": "main", "index": 0 }]
       ]
     },
-    "Llamar L.I.N.D.A.":   { "main": [[{ "node": "Preparar Respuesta",   "type": "main", "index": 0 }]] },
-    "Preparar Respuesta":  { "main": [[{ "node": "Enviar WhatsApp",       "type": "main", "index": 0 }]] },
-    "Enviar WhatsApp":     { "main": [[{ "node": "Responder 200 a Meta",  "type": "main", "index": 0 }]] }
+    "Llamar L.I.N.D.A.":   { "main": [[{ "node": "Preparar Respuesta",  "type": "main", "index": 0 }]] },
+    "Preparar Respuesta":  { "main": [[{ "node": "Enviar WhatsApp",      "type": "main", "index": 0 }]] },
+    "Enviar WhatsApp":     { "main": [[{ "node": "Responder 200 a Meta", "type": "main", "index": 0 }]] }
   },
   "active": false,
   "settings": { "executionOrder": "v1" },
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "espartanos-qro"
-  },
-  "tags": [
-    { "name": "LINDA" },
-    { "name": "whatsapp" },
-    { "name": "cobranza" }
-  ]
+  "tags": [{ "name": "LINDA" }, { "name": "whatsapp" }]
 }
