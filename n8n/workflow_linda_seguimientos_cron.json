@@ -1,0 +1,158 @@
+{
+  "name": "L.I.N.D.A. — Seguimientos automáticos (Cron 8am)",
+  "nodes": [
+
+    {
+      "id": "cron-001",
+      "name": "Cron 8am diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [120, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "minutesInterval": 1 }]
+        },
+        "cronExpression": "0 8 * * *"
+      }
+    },
+
+    {
+      "id": "http-seg-001",
+      "name": "GET /api/seguimientos/hoy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [360, 300],
+      "parameters": {
+        "method": "GET",
+        "url":    "={{ $env.BACKEND_URL }}/api/seguimientos/hoy",
+        "options": { "timeout": 10000 }
+      }
+    },
+
+    {
+      "id": "split-001",
+      "name": "Loop por seguimiento",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options":   {}
+      }
+    },
+
+    {
+      "id": "code-seg-001",
+      "name": "Preparar recordatorio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 300],
+      "parameters": {
+        "jsCode": "const seg   = $input.first().json;\nconst plan  = seg.plan;\nconst tel   = seg.telefono || '';\nconst motivo = seg.motivo  || 'Seguimiento de cobranza';\n\n// Verificar si hay promesa rota (fecha pasada, estatus pendiente)\nconst promesas = seg.promesas || [];\nconst hoy = new Date().toISOString().slice(0,10);\nconst promesaRota = promesas.find(p => p.estatus === 'pendiente' && p.fecha_compromiso < hoy);\n\nconst esEscalacion = !!promesaRota;\n\nconst mensajeRecordatorio = esEscalacion\n  ? `Hola, le contactamos de Libertad Financiera respecto a su crédito ${plan}. Detectamos que no se realizó el pago comprometido para el ${promesaRota.fecha_compromiso}. Es urgente que nos comuniquemos hoy. Marque al 442 394 5911.`\n  : `Hola, le contactamos de Libertad Financiera respecto a su crédito ${plan}. Queremos apoyarle a regularizar su cuenta. ¿Está disponible para hablar?`;\n\nreturn [{\n  json: {\n    seguimiento_id: seg.id,\n    plan,\n    telefono: tel,\n    mensaje:  mensajeRecordatorio,\n    canal:    seg.canal || 'whatsapp',\n    escalar:  esEscalacion,\n    promesa_rota: promesaRota || null,\n  }\n}];\n"
+      }
+    },
+
+    {
+      "id": "if-seg-001",
+      "name": "¿Tiene teléfono?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 300],
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue":  "={{ $json.telefono.length }}",
+              "rightValue": 7,
+              "operator":   { "type": "number", "operation": "gte" }
+            }
+          ]
+        }
+      }
+    },
+
+    {
+      "id": "http-wa-001",
+      "name": "Enviar recordatorio WA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 200],
+      "parameters": {
+        "method": "POST",
+        "url":    "https://graph.facebook.com/v22.0/{{ $env.WA_PHONE_NUMBER_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{ $env.WA_TOKEN }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody":     true,
+        "contentType":  "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: '52' + $json.telefono.replace(/\\D/g,'').slice(-10), type: 'text', text: { body: $json.mensaje } }) }}",
+        "options": { "timeout": 15000 }
+      }
+    },
+
+    {
+      "id": "http-mark-001",
+      "name": "Marcar seguimiento ejecutado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 200],
+      "parameters": {
+        "method": "PATCH",
+        "url":    "={{ $env.BACKEND_URL }}/api/seguimientos/{{ $('Preparar recordatorio').first().json.seguimiento_id }}",
+        "sendBody":     true,
+        "contentType":  "raw",
+        "rawContentType": "application/json",
+        "body": "{\"estatus\":\"ejecutado\"}",
+        "options": { "timeout": 10000 }
+      }
+    },
+
+    {
+      "id": "log-001",
+      "name": "Sin teléfono — log",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1320, 400],
+      "parameters": {}
+    }
+
+  ],
+
+  "connections": {
+    "Cron 8am diario": {
+      "main": [[{ "node": "GET /api/seguimientos/hoy", "type": "main", "index": 0 }]]
+    },
+    "GET /api/seguimientos/hoy": {
+      "main": [[{ "node": "Loop por seguimiento", "type": "main", "index": 0 }]]
+    },
+    "Loop por seguimiento": {
+      "main": [[{ "node": "Preparar recordatorio", "type": "main", "index": 0 }]]
+    },
+    "Preparar recordatorio": {
+      "main": [[{ "node": "¿Tiene teléfono?", "type": "main", "index": 0 }]]
+    },
+    "¿Tiene teléfono?": {
+      "main": [
+        [{ "node": "Enviar recordatorio WA",     "type": "main", "index": 0 }],
+        [{ "node": "Sin teléfono — log",          "type": "main", "index": 0 }]
+      ]
+    },
+    "Enviar recordatorio WA": {
+      "main": [[{ "node": "Marcar seguimiento ejecutado", "type": "main", "index": 0 }]]
+    },
+    "Marcar seguimiento ejecutado": {
+      "main": [[{ "node": "Loop por seguimiento", "type": "main", "index": 0 }]]
+    }
+  },
+
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "instanceId": "espartanos-qro" },
+  "tags": [{ "name": "linda" }, { "name": "cron" }, { "name": "seguimientos" }]
+}
