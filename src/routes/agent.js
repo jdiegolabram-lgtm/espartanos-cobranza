@@ -288,58 +288,65 @@ module.exports = async function (fastify) {
         .order('dm', { ascending: false })
         .limit(1)
 
-      // Sin cuenta → respuesta genérica, escalar
-      if (!cuentas?.length) {
-        fastify.log.warn(`[L.I.N.D.A.] Sin cuenta para ${tel}`)
-        return reply.status(200).send({
-          ok:               false,
-          reply:            'Gracias por comunicarse con Libertad Servicios Financieros. Para atenderle correctamente, indíquenos su número de crédito o llame al 442 394 5911.',
-          intent:           'sin_intencion',
-          management_result:'sin_contacto',
-          should_escalate:  true,
-          actions:          ['escalar_caso'],
-          duracion_ms:      Date.now() - inicio,
-        })
+      // ── 2. Cuenta encontrada o valores por defecto ───────────────────────
+      const cuentaEncontrada = !!(cuentas?.length)
+      const cuenta = cuentaEncontrada ? cuentas[0] : {
+        nombre:              'Cliente no identificado',
+        plan:                null,
+        folio:               null,
+        dm:                  0,
+        total:               0,
+        cuotas:              0,
+        saldo:               0,
+        noCuotas:            0,
+        comportamiento:      'Desconocido',
+        empresa:             'No registrada',
+        telefono:            tel,
       }
 
-      const cuenta = cuentas[0]
-      const folio  = cuenta.plan || cuenta.folio
+      const folio       = cuenta.plan || cuenta.folio || null
       const telefCuenta = cuenta.telefono || tel
 
-      // ── 2. Cargar datos relacionados en paralelo ─────────────────────────
-      const [
-        { data: gestiones  },
-        { data: promesas   },
-        { data: historialConv },
-      ] = await Promise.all([
-        supabase.from('gestiones')
-          .select('canal,estatus,nota,created_at')
-          .eq('plan', folio)
-          .order('created_at', { ascending: false })
-          .limit(1),
+      if (!cuentaEncontrada) {
+        fastify.log.warn(`[L.I.N.D.A.] Sin cuenta para ${tel} — usando contexto genérico`)
+      }
 
-        supabase.from('promesas')
-          .select('monto,fecha_compromiso,estatus')
-          .eq('plan', folio)
-          .eq('estatus', 'pendiente')
-          .order('fecha_compromiso', { ascending: true }),
+      // ── 3. Cargar datos relacionados (solo si hay folio) ─────────────────
+      let gestiones = [], promesas = [], historial = []
 
-        supabase.from('conversaciones')
-          .select('mensaje_cliente,respuesta_linda')
-          .eq('plan', folio)
-          .order('created_at', { ascending: false })
-          .limit(3),
-      ])
+      if (folio) {
+        const [
+          { data: g },
+          { data: p },
+          { data: h },
+        ] = await Promise.all([
+          supabase.from('gestiones')
+            .select('canal,estatus,nota,created_at')
+            .eq('plan', folio)
+            .order('created_at', { ascending: false })
+            .limit(1),
 
-      // Historial en orden cronológico para multi-turno
-      const historial = (historialConv || [])
-        .reverse()
-        .map(c => ({ cliente: c.mensaje_cliente, linda: c.respuesta_linda }))
+          supabase.from('promesas')
+            .select('monto,fecha_compromiso,estatus')
+            .eq('plan', folio)
+            .eq('estatus', 'pendiente')
+            .order('fecha_compromiso', { ascending: true }),
 
-      // ── 3. Construir contexto ────────────────────────────────────────────
-      const contexto = buildContext(cuenta, gestiones?.[0] || null, promesas || [])
+          supabase.from('conversaciones')
+            .select('mensaje_cliente,respuesta_linda')
+            .eq('plan', folio)
+            .order('created_at', { ascending: false })
+            .limit(3),
+        ])
+        gestiones = g || []
+        promesas  = p || []
+        historial = (h || []).reverse().map(c => ({ cliente: c.mensaje_cliente, linda: c.respuesta_linda }))
+      }
 
-      // ── 4. Invocar L.I.N.D.A. ───────────────────────────────────────────
+      // ── 4. Construir contexto ────────────────────────────────────────────
+      const contexto = buildContext(cuenta, gestiones[0] || null, promesas)
+
+      // ── 5. Invocar L.I.N.D.A. (siempre) ─────────────────────────────────
       const linda = await callLINDA(contexto, mensaje, historial)
 
       fastify.log.info(
@@ -348,19 +355,19 @@ module.exports = async function (fastify) {
         ` | ${Date.now() - inicio}ms`
       )
 
-      // ── 5. Ejecutar acciones en paralelo (sin bloquear respuesta) ────────
+      // ── 6. Ejecutar acciones en paralelo (sin bloquear respuesta) ────────
       await Promise.allSettled([
-        registrarGestion(folio, canal, linda),
-        registrarPromesa(folio, telefCuenta, linda),
-        programarSeguimiento(folio, telefCuenta, linda),
-        guardarConversacion(folio, telefCuenta, mensaje, linda),
+        registrarGestion(folio || tel, canal, linda),
+        registrarPromesa(folio || tel, telefCuenta, linda),
+        programarSeguimiento(folio || tel, telefCuenta, linda),
+        guardarConversacion(folio || tel, telefCuenta, mensaje, linda),
       ])
 
-      // ── 6. Respuesta final ───────────────────────────────────────────────
+      // ── 7. Respuesta final ───────────────────────────────────────────────
       return {
-        ok:                     true,
+        ok:                     cuentaEncontrada,
         plan:                   folio,
-        nombre:                 cuenta.nombre || cuenta.nombre_cliente,
+        nombre:                 cuenta.nombre || cuenta.nombre_cliente || null,
         reply:                  linda.reply,
         intent:                 linda.intent,
         management_result:      linda.management_result,
