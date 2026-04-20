@@ -1,0 +1,204 @@
+{
+  "name": "LINDA – W2 – Proactivo",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{
+            "field": "cronExpression",
+            "expression": "0 9 * * 1-6"
+          }]
+        }
+      },
+      "id": "b1b2c3d4-0001-4000-8000-000000000101",
+      "name": "Schedule 9am L-S",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/v_campana_activa?select=*&ultima_wa=lt.' + new Date(Date.now() - 86400000).toISOString() + '&order=dias_mora.desc&limit=50' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0002-4000-8000-000000000102",
+      "name": "Obtener Cuentas Pendientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cuentas = $input.first().json;\nif (!Array.isArray(cuentas) || cuentas.length === 0) {\n  return [{ json: { total: 0, cuentas: [] } }];\n}\nreturn cuentas.map(c => ({ json: c }));"
+      },
+      "id": "b1b2c3d4-0003-4000-8000-000000000103",
+      "name": "Expandir Cuentas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{
+            "id": "cond-tiene-tel",
+            "leftValue": "={{ $json.telefono }}",
+            "rightValue": "",
+            "operator": { "type": "string", "operation": "notEmpty" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0004-4000-8000-000000000104",
+      "name": "\u00bfTiene Tel\u00e9fono?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $input.first().json;\nconst digits = (c.telefono || '').replace(/\\D/g, '');\nconst tel10 = digits.slice(-10);\nconst telFull = '52' + tel10;\nconst bucket = c.bucket || '1-30';\nconst comp = c.comportamiento_historico || 'regular';\nlet modelo;\nif (bucket === '1-30') modelo = 'empatico';\nelse if (bucket === '31-60') modelo = (comp === 'malo') ? 'presion' : 'firme';\nelse modelo = 'presion';\nreturn [{ json: { ...c, telefono_full: telFull, modelo } }];"
+      },
+      "id": "b1b2c3d4-0005-4000-8000-000000000105",
+      "name": "Tel + Modelo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const c = $input.first().json;\nconst prompts = {\n  empatico: `Eres L.I.N.D.A., agente de Libertad Financiera. Tono: AMABLE y cercano.\nOBJETIVO: Iniciar conversaci\u00f3n, recordar el adeudo con empat\u00eda, invitar al pago.\nREGLAS: M\u00e1ximo 3 oraciones. Espa\u00f1ol mexicano. No mencionar consecuencias negativas.\nCLIENTE: ${c.nombre_cliente} | ${c.dias_mora} d\u00edas atraso | $${c.monto_vencido} MXN vencido | Bucket ${c.bucket}\nGenera un mensaje proactivo de apertura para WhatsApp. Solo el texto.`,\n  firme: `Eres L.I.N.D.A., agente de Libertad Financiera. Tono: FIRME y directo.\nOBJETIVO: Exigir regularizaci\u00f3n urgente con fecha concreta.\nREGLAS: M\u00e1ximo 3 oraciones. Mencionar que el historial crediticio est\u00e1 en riesgo.\nCLIENTE: ${c.nombre_cliente} | ${c.dias_mora} d\u00edas atraso | $${c.monto_vencido} MXN vencido | Bucket ${c.bucket}\nGenera un mensaje proactivo de cobro para WhatsApp. Solo el texto.`,\n  presion: `Eres L.I.N.D.A., agente de Libertad Financiera. Tono: URGENTE y determinado.\nOBJETIVO: Cierre inmediato. Pago hoy o ma\u00f1ana sin excepci\u00f3n.\nREGLAS: 2 oraciones m\u00e1ximo. Mencionar visita de campo si no hay respuesta.\nCLIENTE: ${c.nombre_cliente} | ${c.dias_mora} d\u00edas atraso | $${c.monto_vencido} MXN vencido | $${c.saldo_total} MXN saldo total\nGenera el mensaje proactivo de presi\u00f3n para WhatsApp. Solo el texto.`\n};\nreturn [{ json: { ...c, prompt: prompts[c.modelo] } }];"
+      },
+      "id": "b1b2c3d4-0006-4000-8000-000000000106",
+      "name": "Construir Prompt Proactivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + $vars.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.prompt }] }] }) }}",
+        "options": {}
+      },
+      "id": "b1b2c3d4-0007-4000-8000-000000000107",
+      "name": "Llamar Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Construir Prompt Proactivo').first().json;\nconst gemini = $input.first().json;\nconst texto = gemini?.candidates?.[0]?.content?.parts?.[0]?.text\n  || 'Hola, te contactamos de Libertad Financiera. Comunicate al 800 para regularizar.';\nreturn [{ json: { ...prev, respuesta_ia: texto.trim() } }];"
+      },
+      "id": "b1b2c3d4-0008-4000-8000-000000000108",
+      "name": "Extraer Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v22.0/' + $vars.WHATSAPP_PHONE_ID + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.WHATSAPP_TOKEN }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.telefono_full, type: 'text', text: { body: $json.respuesta_ia } }) }}",
+        "options": {}
+      },
+      "id": "b1b2c3d4-0009-4000-8000-000000000109",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/gestiones' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ cuenta_id: $json.id, canal: 'whatsapp', tipo: 'T', mensaje_in: 'PROACTIVO', mensaje_out: $json.respuesta_ia, intent: 'proactivo', resultado: 'enviado', agente: 'LINDA-' + $json.modelo }) }}",
+        "options": {}
+      },
+      "id": "b1b2c3d4-0010-4000-8000-000000000110",
+      "name": "Registrar Gesti\u00f3n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 180]
+    }
+  ],
+  "connections": {
+    "Schedule 9am L-S": {
+      "main": [[{ "node": "Obtener Cuentas Pendientes", "type": "main", "index": 0 }]]
+    },
+    "Obtener Cuentas Pendientes": {
+      "main": [[{ "node": "Expandir Cuentas", "type": "main", "index": 0 }]]
+    },
+    "Expandir Cuentas": {
+      "main": [[{ "node": "\u00bfTiene Tel\u00e9fono?", "type": "main", "index": 0 }]]
+    },
+    "\u00bfTiene Tel\u00e9fono?": {
+      "main": [
+        [{ "node": "Tel + Modelo", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Tel + Modelo": {
+      "main": [[{ "node": "Construir Prompt Proactivo", "type": "main", "index": 0 }]]
+    },
+    "Construir Prompt Proactivo": {
+      "main": [[{ "node": "Llamar Gemini", "type": "main", "index": 0 }]]
+    },
+    "Llamar Gemini": {
+      "main": [[{ "node": "Extraer Respuesta", "type": "main", "index": 0 }]]
+    },
+    "Extraer Respuesta": {
+      "main": [[{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]]
+    },
+    "Enviar WhatsApp": {
+      "main": [[{ "node": "Registrar Gesti\u00f3n", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "c2d3e4f5-a6b7-8901-bcde-f12345678901",
+  "id": "w2-linda-proactivo-0000000002",
+  "tags": [{ "name": "LINDA" }]
+}
