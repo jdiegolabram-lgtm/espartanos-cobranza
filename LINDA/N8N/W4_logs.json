@@ -1,0 +1,64 @@
+{
+  "name": "LINDA – W4 – Logs",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linda-logs",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d1b2c3d4-0001-4000-8000-000000000301",
+      "name": "Recibir Log",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "linda-logs"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/linda_logs' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ workflow: $json.workflow || 'unknown', evento: $json.evento || 'log', cuenta_id: $json.cuenta_id || null, payload: $json.payload || {}, error: $json.error || null, duracion_ms: $json.duracion_ms || null }) }}",
+        "options": {}
+      },
+      "id": "d1b2c3d4-0002-4000-8000-000000000302",
+      "name": "Guardar en Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\": true}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "d1b2c3d4-0003-4000-8000-000000000303",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Recibir Log":        { "main": [[{ "node": "Guardar en Supabase", "type": "main", "index": 0 }]] },
+    "Guardar en Supabase": { "main": [[{ "node": "Responder OK",        "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "e4f5a6b7-c8d9-0123-def0-234567890123",
+  "id": "w4-linda-logs-000000000004",
+  "tags": [{ "name": "LINDA" }]
+}

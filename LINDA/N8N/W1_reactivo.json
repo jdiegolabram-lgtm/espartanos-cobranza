@@ -1,0 +1,230 @@
+{
+  "name": "LINDA – W1 – Reactivo",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-cobranza",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Recibir de Railway",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "linda-ai-cobranza"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst digits = (d.telefono || '').replace(/\\D/g, '');\nconst tel10 = digits.slice(-10);\nreturn [{\n  json: {\n    telefono_10: tel10,\n    telefono_full: '52' + tel10,\n    nombre_cliente: d.nombre_cliente || 'Cliente',\n    mensaje_cliente: d.mensaje_cliente || '',\n    mensaje_id: d.mensaje_id || ''\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Normalizar Teléfono",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/cuentas_cobranza?or=(telefono.eq.' + $json.telefono_10 + ',telefono.eq.' + $json.telefono_full + ')&select=id,folio,nombre_cliente,telefono,dias_mora,bucket,monto_vencido,pago_vencido,saldo_total,comportamiento_historico&limit=1&order=dias_mora.desc' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",         "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization",  "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",   "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Buscar Cuenta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Normalizar Tel\u00e9fono').first().json;\nconst cuentas = $input.first().json;\nif (!Array.isArray(cuentas) || cuentas.length === 0) {\n  return [{ json: { encontrada: false, telefono_full: prev.telefono_full, mensaje_cliente: prev.mensaje_cliente } }];\n}\nconst c = cuentas[0];\nconst bucket = c.bucket || '1-30';\nconst comp = c.comportamiento_historico || 'regular';\nlet modelo;\nif (bucket === '1-30') modelo = 'empatico';\nelse if (bucket === '31-60') modelo = (comp === 'malo') ? 'presion' : 'firme';\nelse modelo = 'presion';\nreturn [{ json: { encontrada: true, cuenta: c, modelo, telefono_full: prev.telefono_full, mensaje_cliente: prev.mensaje_cliente } }];"
+      },
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Preparar + Modelo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{
+            "id": "cond-encontrada",
+            "leftValue": "={{ $json.encontrada }}",
+            "rightValue": true,
+            "operator": { "type": "boolean", "operation": "true" }
+          }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "\u00bfCuenta Encontrada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst c = d.cuenta;\nconst prompts = {\n  empatico: `Eres L.I.N.D.A., agente de cobranza de Libertad Financiera. Tu tono es EMP\u00c1TICO y cercano.\nOBJETIVO: Que el cliente reconozca su deuda y haga una promesa de pago concreta.\nREGLAS: M\u00e1ximo 3 oraciones. Espa\u00f1ol mexicano. Sin amenazas. Sin tecnicismos.\nACCIONES PERMITIDAS: preguntar c\u00f3mo est\u00e1, ofrecer opciones de pago, confirmar fecha.\nCONTEXTO CLIENTE:\nNombre: ${c.nombre_cliente}\nAtraso: ${c.dias_mora} d\u00edas (Bucket ${c.bucket})\nMonto vencido: $${c.monto_vencido} MXN\nPago mensual: $${c.pago_vencido} MXN\nSaldo total: $${c.saldo_total} MXN\nMensaje del cliente: \"${d.mensaje_cliente}\"\nResponde directamente el mensaje de WhatsApp. Solo el texto, sin explicaciones.`,\n  firme: `Eres L.I.N.D.A., agente de cobranza de Libertad Financiera. Tu tono es FIRME y profesional.\nOBJETIVO: Obtener un compromiso de pago con fecha y monto exacto hoy.\nREGLAS: M\u00e1ximo 3 oraciones. Directo. Sin rodeos. Sin amenazas ilegales.\nCONTEXTO CLIENTE:\nNombre: ${c.nombre_cliente}\nAtraso: ${c.dias_mora} d\u00edas (Bucket ${c.bucket})\nMonto vencido: $${c.monto_vencido} MXN\nPago mensual: $${c.pago_vencido} MXN\nMensaje del cliente: \"${d.mensaje_cliente}\"\nResponde directamente el mensaje de WhatsApp. Solo el texto.`,\n  presion: `Eres L.I.N.D.A., agente de cobranza de Libertad Financiera. Tu tono es URGENTE y determinado.\nOBJETIVO: Cierre inmediato. Pago hoy o fecha m\u00e1ximo 48 horas.\nREGLAS: M\u00e1ximo 2 oraciones. Mencionar consecuencias reales (hist\u00f3rico crediticio, visita de campo). Sin inventar.\nCONTEXTO CLIENTE:\nNombre: ${c.nombre_cliente}\nAtraso: ${c.dias_mora} d\u00edas (Bucket ${c.bucket})\nMonto vencido: $${c.monto_vencido} MXN\nSaldo total: $${c.saldo_total} MXN\nMensaje del cliente: \"${d.mensaje_cliente}\"\nResponde directamente. Solo el texto del mensaje.`\n};\nreturn [{ json: { ...d, prompt: prompts[d.modelo] } }];"
+      },
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Construir Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + $vars.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.prompt }] }] }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Llamar Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Construir Prompt').first().json;\nconst gemini = $input.first().json;\nconst texto = gemini?.candidates?.[0]?.content?.parts?.[0]?.text\n  || gemini?.candidates?.[0]?.content?.parts?.[0]?.text\n  || 'En este momento no puedo procesar tu solicitud. Por favor llama al 800 de Libertad Financiera.';\nreturn [{ json: { ...prev, respuesta_ia: texto.trim() } }];"
+      },
+      "id": "a1b2c3d4-0008-4000-8000-000000000008",
+      "name": "Extraer Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v22.0/' + $vars.WHATSAPP_PHONE_ID + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization",  "value": "={{ 'Bearer ' + $vars.WHATSAPP_TOKEN }}" },
+            { "name": "Content-Type",   "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.telefono_full, type: 'text', text: { body: $json.respuesta_ia } }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0009-4000-8000-000000000009",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/gestiones' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",         "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization",  "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",   "value": "application/json" },
+            { "name": "Prefer",         "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ cuenta_id: $json.cuenta.id, canal: 'whatsapp', tipo: 'T', mensaje_in: $json.mensaje_cliente, mensaje_out: $json.respuesta_ia, intent: 'reactivo', resultado: 'contacto_exitoso', agente: 'LINDA-' + $json.modelo }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0010-4000-8000-000000000010",
+      "name": "Registrar Gesti\u00f3n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 180]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"ok\", \"modelo\": \"{{ $('Construir Prompt').first().json.modelo }}\" }",
+        "options": { "responseCode": 200 }
+      },
+      "id": "a1b2c3d4-0011-4000-8000-000000000011",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2440, 180]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"not_found\"}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "a1b2c3d4-0012-4000-8000-000000000012",
+      "name": "Responder No Encontrado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1340, 440]
+    }
+  ],
+  "connections": {
+    "Recibir de Railway": {
+      "main": [[{ "node": "Normalizar Tel\u00e9fono", "type": "main", "index": 0 }]]
+    },
+    "Normalizar Tel\u00e9fono": {
+      "main": [[{ "node": "Buscar Cuenta", "type": "main", "index": 0 }]]
+    },
+    "Buscar Cuenta": {
+      "main": [[{ "node": "Preparar + Modelo", "type": "main", "index": 0 }]]
+    },
+    "Preparar + Modelo": {
+      "main": [[{ "node": "\u00bfCuenta Encontrada?", "type": "main", "index": 0 }]]
+    },
+    "\u00bfCuenta Encontrada?": {
+      "main": [
+        [{ "node": "Construir Prompt",          "type": "main", "index": 0 }],
+        [{ "node": "Responder No Encontrado",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Construir Prompt": {
+      "main": [[{ "node": "Llamar Gemini", "type": "main", "index": 0 }]]
+    },
+    "Llamar Gemini": {
+      "main": [[{ "node": "Extraer Respuesta", "type": "main", "index": 0 }]]
+    },
+    "Extraer Respuesta": {
+      "main": [[{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]]
+    },
+    "Enviar WhatsApp": {
+      "main": [[{ "node": "Registrar Gesti\u00f3n", "type": "main", "index": 0 }]]
+    },
+    "Registrar Gesti\u00f3n": {
+      "main": [[{ "node": "Responder OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "b1c2d3e4-f5a6-7890-abcd-ef1234567890",
+  "id": "w1-linda-reactivo-00000000001",
+  "tags": [{ "name": "LINDA" }]
+}

@@ -1,0 +1,107 @@
+{
+  "generado": "2026-04-20",
+  "total_html": 29,
+  "total_xlsx_relevantes": 18,
+  "familias": [
+    {
+      "familia": "Dashboard Espartanos",
+      "candidato_principal": "Espartanos_Dashboard_v5_QRO_ABR2026.html",
+      "fecha": "2026-04-01",
+      "tamanio_bytes": 132214,
+      "estado": "activo",
+      "versiones_historicas": [
+        "Espartanos_Dashboard_v2_QRO_2026.html",
+        "Espartanos_Dashboard_v2_QRO_2026 (1).html",
+        "Espartanos_Dashboard_v2_QRO_2026 (2).html",
+        "Espartanos_Dashboard_v3_QRO_2026.html"
+      ],
+      "tecnologias": ["Chart.js 4.4", "XLSX.js", "Login", "Tabs", "Filtros por semana"],
+      "descripcion": "Dashboard ejecutivo con m\u00e9tricas de gesti\u00f3n, efectividad por gestor, progreso de recuperaci\u00f3n y gr\u00e1ficas comparativas"
+    },
+    {
+      "familia": "Front Operativo",
+      "candidato_principal": "Espartanos_Front_Operativo_v6_6.html",
+      "fecha": "2026-04-03",
+      "tamanio_bytes": 97127,
+      "estado": "activo",
+      "versiones_historicas": [
+        "Espartanos_Front_Operativo_v6_4-1.html"
+      ],
+      "tecnologias": ["XLSX.js", "Login", "Rutas por d\u00eda", "Segmentos", "Carga de archivos"],
+      "descripcion": "Front operativo diario para gestores: carga de cartera, visualizaci\u00f3n de rutas por d\u00eda, segmentaci\u00f3n de cuentas"
+    },
+    {
+      "familia": "Gesti\u00f3n de Campo",
+      "candidato_principal": "Espartanos_GestionCampo_v3.1.html",
+      "fecha": "2026-04-16",
+      "tamanio_bytes": 81720,
+      "estado": "activo",
+      "versiones_historicas": [
+        "Espartanos_GestionCampo_Octavio V.2.html"
+      ],
+      "tecnologias": ["Leaflet.js (mapa)", "XLSX.js", "Filtros multi-colonia", "Sort din\u00e1mico", "Barra de arrastre"],
+      "descripcion": "Herramienta de campo con mapa interactivo, lista de cuentas por visitar, filtros por colonia/bucket/gestor, indicador de arrastre"
+    },
+    {
+      "familia": "Navegaci\u00f3n / Rutas",
+      "candidato_principal": "Ruta_Navegacion_Espartanos.1.1html.html",
+      "fecha": "2026-04-03",
+      "tamanio_bytes": 118089,
+      "estado": "activo",
+      "versiones_historicas": [
+        "Ruta_Navegacion_Espartanos.html",
+        "Ruta_Navegacion_Espartanos_1.html",
+        "Ruta_ViernesSanto_Octavio_QRO.html"
+      ],
+      "tecnologias": ["Leaflet.js", "Rutas optimizadas", "Exportar a Google Maps"],
+      "descripcion": "Generador de rutas de campo optimizadas por zona/d\u00eda, con exportaci\u00f3n a Google Maps"
+    },
+    {
+      "familia": "Cobranza Dashboard (gen\u00e9rico)",
+      "candidato_principal": "cobranza_dashboard (4).html",
+      "fecha": "2026-03-06",
+      "tamanio_bytes": 39311,
+      "estado": "historico",
+      "versiones_historicas": [
+        "cobranza_dashboard.html",
+        "cobranza_dashboard (1).html",
+        "cobranza_dashboard (2).html",
+        "cobranza_dashboard (3).html",
+        "cobranza_dashboard (3) (1).html"
+      ],
+      "descripcion": "Versi\u00f3n gen\u00e9rica anterior al dashboard Espartanos. Reemplazada por v5."
+    },
+    {
+      "familia": "Espartanos Cobranza QRO (monol\u00edtico)",
+      "candidato_principal": "espartanos_v2_FINAL.html",
+      "fecha": "2026-03-15",
+      "tamanio_bytes": 445150,
+      "estado": "historico",
+      "versiones_historicas": [
+        "espartanos_cobranza_qro.html",
+        "cobranza_qro_norte.html",
+        "cobranza_qro_norte (1).html"
+      ],
+      "descripcion": "Versi\u00f3n monol\u00edtica grande. Referencia hist\u00f3rica importante (445 KB). Contiene l\u00f3gica compleja de cobranza."
+    },
+    {
+      "familia": "Tablero de Arrastre",
+      "candidato_principal": "TABLERO DE ARRASTRE 050326.html",
+      "fecha": "2026-03-05",
+      "tamanio_bytes": 33044,
+      "estado": "activo",
+      "descripcion": "Tablero espec\u00edfico para seguimiento de arrastre semanal"
+    }
+  ],
+  "xlsx_cartera": [
+    "ASIGNADA QUER\u00c9TARO NORTE_S33_COBRANZA_EN_CAMPO_(01 A 90 DM).XLSX",
+    "ASIGNADA QUERETARO_S40_COBRANZA_EN_CAMPO_(01 A 90 DM) R.XLSX",
+    "BASE REESTRUCTURAS CAMPO QRO.xlsx",
+    "CARTERA NVA RESTRUCTURAS FORMIIK SEM12 ok revisada.xlsx"
+  ],
+  "zip_backup": {
+    "ruta_local": "C:\\Users\\8\\Downloads\\LINDA_RESPALDO_HTML.zip",
+    "tamanio": "606 KB",
+    "contiene": 8
+  }
+}

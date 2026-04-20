@@ -2,7 +2,12 @@
 
 const { OpenAI } = require('openai')
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+// Inicialización lazy: evita crash al arrancar si OPENAI_API_KEY no está configurada
+let _client = null
+function getClient() {
+  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  return _client
+}
 
 const SYSTEM_PROMPT = `Eres L.I.N.D.A., agente inteligente de cobranza de Libertad Financiera.
 
@@ -68,7 +73,7 @@ async function llamarLINDA(contexto, mensajeCliente) {
     `MENSAJE DEL CLIENTE:\n"${mensajeCliente}"\n\n` +
     `Analiza el mensaje, detecta la intención y responde con el JSON estructurado.`
 
-  const completion = await client.chat.completions.create({
+  const completion = await getClient().chat.completions.create({
     model:           process.env.OPENAI_MODEL || 'gpt-4o-mini',
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },

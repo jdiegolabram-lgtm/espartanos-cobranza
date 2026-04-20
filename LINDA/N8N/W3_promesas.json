@@ -1,0 +1,151 @@
+{
+  "name": "LINDA – W3 – Promesas Vencidas",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{
+            "field": "cronExpression",
+            "expression": "0 8 * * *"
+          }]
+        }
+      },
+      "id": "c1b2c3d4-0001-4000-8000-000000000201",
+      "name": "Schedule 8am Diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/v_promesas_vencidas?select=*&limit=30&order=dias_mora.desc' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1b2c3d4-0002-4000-8000-000000000202",
+      "name": "Obtener Promesas Vencidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.first().json;\nif (!Array.isArray(rows) || rows.length === 0) return [];\nreturn rows.map(r => ({ json: r }));"
+      },
+      "id": "c1b2c3d4-0003-4000-8000-000000000203",
+      "name": "Expandir Promesas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $input.first().json;\nconst digits = (p.telefono || '').replace(/\\D/g, '');\nconst tel10 = digits.slice(-10);\nconst bucket = p.bucket || '61-90';\nlet modelo = bucket === '1-30' ? 'firme' : 'presion';\nconst prompt = `Eres L.I.N.D.A., agente de cobranza de Libertad Financiera. Tono: DIRECTO y urgente.\nSITUACI\u00d3N: El cliente hizo una promesa de pago que NO cumpli\u00f3.\nOBJETIVO: Confrontar el incumplimiento y obtener nuevo compromiso con fecha HOY o ma\u00f1ana.\nREGLAS: M\u00e1ximo 3 oraciones. Mencionar la promesa incumplida sin agredir. Pedir nueva fecha concreta.\nCLIENTE: ${p.nombre_cliente} | Prometi\u00f3 pagar $${p.monto_prometido} el ${p.fecha_promesa} (NO cumpli\u00f3)\nAtraso actual: ${p.dias_mora} d\u00edas | Monto vencido: $${p.monto_vencido} MXN\nGenera el mensaje de seguimiento a promesa incumplida. Solo el texto.`;\nreturn [{ json: { ...p, telefono_full: '52' + tel10, modelo, prompt } }];"
+      },
+      "id": "c1b2c3d4-0004-4000-8000-000000000204",
+      "name": "Preparar Promesa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + $vars.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ contents: [{ parts: [{ text: $json.prompt }] }] }) }}",
+        "options": {}
+      },
+      "id": "c1b2c3d4-0005-4000-8000-000000000205",
+      "name": "Llamar Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Preparar Promesa').first().json;\nconst gemini = $input.first().json;\nconst texto = gemini?.candidates?.[0]?.content?.parts?.[0]?.text\n  || 'Tu promesa de pago venci\u00f3. Cont\u00e1ctanos hoy para regularizar.';\nreturn [{ json: { ...prev, respuesta_ia: texto.trim() } }];"
+      },
+      "id": "c1b2c3d4-0006-4000-8000-000000000206",
+      "name": "Extraer Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.facebook.com/v22.0/' + $vars.WHATSAPP_PHONE_ID + '/messages' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.WHATSAPP_TOKEN }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.telefono_full, type: 'text', text: { body: $json.respuesta_ia } }) }}",
+        "options": {}
+      },
+      "id": "c1b2c3d4-0007-4000-8000-000000000207",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SUPABASE_URL + '/rest/v1/gestiones' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $vars.SUPABASE_SERVICE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ cuenta_id: $json.cuenta_id, canal: 'whatsapp', tipo: 'T', mensaje_in: 'PROMESA_VENCIDA', mensaje_out: $json.respuesta_ia, intent: 'seguimiento_promesa', resultado: 'enviado', agente: 'LINDA-promesas' }) }}",
+        "options": {}
+      },
+      "id": "c1b2c3d4-0008-4000-8000-000000000208",
+      "name": "Registrar Gesti\u00f3n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300]
+    }
+  ],
+  "connections": {
+    "Schedule 8am Diario":       { "main": [[{ "node": "Obtener Promesas Vencidas",  "type": "main", "index": 0 }]] },
+    "Obtener Promesas Vencidas": { "main": [[{ "node": "Expandir Promesas",          "type": "main", "index": 0 }]] },
+    "Expandir Promesas":         { "main": [[{ "node": "Preparar Promesa",           "type": "main", "index": 0 }]] },
+    "Preparar Promesa":          { "main": [[{ "node": "Llamar Gemini",              "type": "main", "index": 0 }]] },
+    "Llamar Gemini":             { "main": [[{ "node": "Extraer Respuesta",          "type": "main", "index": 0 }]] },
+    "Extraer Respuesta":         { "main": [[{ "node": "Enviar WhatsApp",            "type": "main", "index": 0 }]] },
+    "Enviar WhatsApp":           { "main": [[{ "node": "Registrar Gesti\u00f3n",         "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "d3e4f5a6-b7c8-9012-cdef-123456789012",
+  "id": "w3-linda-promesas-00000000003",
+  "tags": [{ "name": "LINDA" }]
+}
