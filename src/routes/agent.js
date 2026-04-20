@@ -1,118 +1,361 @@
 'use strict'
 
-const { consultarCuenta, construirContexto } = require('../modules/linda/contexto')
-const { llamarLINDA }                        = require('../modules/linda/openai')
-const {
-  registrarGestion,
-  registrarPromesa,
-  programarSeguimiento,
-  escalarCaso,
-} = require('../modules/linda/acciones')
+const OpenAI = require('openai')
 
+/**
+ * AGENTE L.I.N.D.A.
+ * Líder Inteligente de Negociación y Decisiones Autónomas
+ *
+ * POST /agent/process
+ *   Recibe mensaje de WhatsApp, consulta la cuenta, genera respuesta
+ *   con IA (OpenAI), ejecuta acciones y retorna respuesta estructurada.
+ *
+ * El frontend o n8n envía:
+ *   { telefono, mensaje, canal? }
+ *
+ * L.I.N.D.A. responde:
+ *   { reply, intent, management_result, commitment_*, followup_*, actions }
+ */
+
+const supabase = require('../config/supabase')
+
+// ─────────────────────────────────────────────────────────────────────────────
+const LINDA_SYSTEM_PROMPT = `Eres L.I.N.D.A. (Líder Inteligente de Negociación y Decisiones Autónomas), agente de cobranza de Libertad Servicios Financieros, S.A. de C.V., S.F.P.
+
+OBJETIVO PRINCIPAL:
+Recuperar cartera vencida mediante negociación inteligente, empática y profesional.
+Prioridad: (1) pago total → (2) mínimo 2 cuotas → (3) promesa con fecha exacta → (4) contener cuenta
+
+REGLAS ABSOLUTAS:
+- Sé profesional, claro y persuasivo. Sin amenazas, sin humillar al cliente.
+- No inventes información legal ni menciones instituciones externas.
+- No menciones servicios descontinuados ni bancos específicos.
+- El pago SIEMPRE debe realizarse vía CLABE interbancaria. No menciones otros medios.
+- Máximo 4 líneas por mensaje. Sin asteriscos ni markdown. Español mexicano natural.
+- Si el cliente insulta o agrede, mantén la calma y redirige a solución.
+- Si el cliente dice que ya pagó, regístralo y pide número de operación.
+- Nunca prometas quitas o condonaciones sin autorización.
+
+SEGMENTACIÓN POR BUCKET:
+- 1–30 días (preventivo): Tono empático. Enfatizar recargos, afectación historial Buró. Buscar pago inmediato hoy.
+- 31–60 días (firme): Tono serio. Mencionar vencimiento anticipado del pagaré. Buscar regularización urgente.
+- 61–90 días (institucional): Tono institucional. Área de Prevención y Recuperación. Urgencia máxima. Pago o acuerdo hoy.
+
+INTENCIONES DEL CLIENTE (elige exactamente una):
+- quiere_pagar: tiene intención clara de pagar hoy o mañana
+- solicita_tiempo: pide plazo, prórroga o fecha futura
+- niega_deuda: no reconoce el adeudo
+- sin_dinero: argumenta falta de recursos económicos
+- quiere_negociar: propone pago parcial o arreglo alternativo
+- amenaza_legal: menciona abogados, demandas o derechos del consumidor
+- sin_intencion: no muestra ningún interés en pagar
+- agresivo: lenguaje hostil, insultos o amenazas personales
+- confirmacion_pago: dice haber depositado o pagado ya
+
+MANAGEMENT_RESULT (elige exactamente uno):
+- promesa_pago: el cliente se comprometió con monto y fecha
+- sin_contacto: no hubo respuesta real
+- rechazo: el cliente se negó definitivamente a pagar
+- pago_realizado: el cliente confirma pago realizado
+- negociacion: en proceso de acuerdo, sin promesa formal aún
+- en_proceso: conversación en curso, aún sin definición
+
+ACCIONES (incluye solo las que aplican en este turno):
+- registrar_gestion: siempre incluir
+- registrar_promesa: solo si commitment_date NO es null
+- programar_seguimiento: solo si should_schedule_followup es true
+- escalar_caso: solo si should_escalate es true
+- enviar_correo: si el cliente no tiene teléfono válido o solicita confirmación escrita
+
+ESCALACIÓN: Escala si el cliente lleva 3+ intercambios sin intención, si niega la deuda, o si es agresivo.
+
+RESPONDE ÚNICAMENTE con JSON válido. Sin texto adicional, sin markdown, sin explicaciones fuera del JSON.
+La estructura es EXACTAMENTE esta:
+{
+  "reply": "mensaje para enviar al cliente por WhatsApp (máx 4 líneas, español mexicano)",
+  "intent": "una_de_las_intenciones_listadas",
+  "management_result": "uno_de_los_resultados_listados",
+  "commitment_amount": null,
+  "commitment_date": null,
+  "should_schedule_followup": false,
+  "followup_date": null,
+  "should_escalate": false,
+  "actions": ["registrar_gestion"]
+}``
+
+// ─────────────────────────────────────────────────────────────────────────────
+function buildContext(cuenta, ultimaGestion, promesasActivas) {
+  const dm = cuenta.dm || cuenta.dias_mora || 0
+  const bucket =
+    dm <= 0  ? '0 días (al corriente)' :
+    dm <= 30 ? `${dm} días — bucket 1-30 (preventivo)` :
+    dm <= 60 ? `${dm} días — bucket 31-60 (firme)` :
+    dm <= 89 ? `${dm} días — bucket 61-90 (institucional)` :
+               `${dm} días — bucket 90+ (juridico)`
+
+  const fmt = n => `$${(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
+
+  const lineas = [
+    '=== INFORMACIÓN DE LA CUENTA ===',
+    `Nombre: ${cuenta.nombre || cuenta.nombre_cliente || 'No registrado'}`,
+    `Plan/Folio: ${cuenta.plan || cuenta.folio || 'N/D'}`,
+    `Mora: ${bucket}`,
+    `Comportamiento histórico: ${cuenta.comportamiento || cuenta.comportamiento_historico || 'Regular'}`,
+    `Empresa/Patrón: ${cuenta.empresa || 'No registrada'}`,
+    '',
+    '=== MONTOS ===',
+    `Importe vencido: ${fmt(cuenta.total || cuenta.monto_vencido)}`,
+    `Próximo a vencer: ${fmt(cuenta.cuotas || cuenta.pago_vencido)}`,
+    `Saldo insoluto total: ${fmt(cuenta.saldo || cuenta.saldo_total)}`,
+    `Pagos vencidos: ${cuenta.noCuotas || 1}`,
+    '',
+    '=== GESTIÓN ===',
+    `Última gestión: ${
+      ultimaGestion
+        ? `${ultimaGestion.canal} el ${new Date(ultimaGestion.created_at).toLocaleDateString('es-MX')} — ${ultimaGestion.nota || ultimaGestion.estatus}`
+        : 'Sin gestión previa registrada'
+    }`,
+    `Promesas activas: ${
+      promesasActivas?.length
+        ? promesasActivas.map(p => `${fmt(p.monto)} para ${p.fecha_compromiso}`).join(' | ')
+        : 'Ninguna'
+    }`,
+  ]
+
+  return lineas.join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+async function callLINDA(contexto, mensajeCliente, historial = []) {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) throw new Error('OPENAI_API_KEY no configurada en variables de entorno')
+
+  const client = new OpenAI({ apiKey })
+  const model  = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+
+  const messages = [
+    { role: 'system', content: LINDA_SYSTEM_PROMPT },
+  ]
+
+  for (const turno of historial.slice(-3)) {
+    messages.push({ role: 'user',      content: turno.cliente })
+    messages.push({ role: 'assistant', content: turno.linda   })
+  }
+
+  messages.push({
+    role: 'user',
+    content: `${contexto}\n\n=== MENSAJE DEL CLIENTE ===\n"${mensajeCliente}"\n\nResponde en JSON:`,
+  })
+
+  const completion = await client.chat.completions.create(
+    {
+      model,
+      messages,
+      temperature:     0.35,
+      max_tokens:      512,
+      response_format: { type: 'json_object' },
+    },
+    { timeout: 20_000 }
+  )
+
+  const raw = completion.choices[0]?.message?.content || '{}'
+
+  let parsed = {}
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/)
+    if (match) {
+      try { parsed = JSON.parse(match[0]) } catch { /* usa defaults */ }
+    }
+  }
+
+  return {
+    reply:                    String(parsed.reply                    || 'Gracias por comunicarse. En breve un asesor le contacta.'),
+    intent:                   String(parsed.intent                   || 'en_proceso'),
+    management_result:        String(parsed.management_result        || 'en_proceso'),
+    commitment_amount:        parsed.commitment_amount != null ? Number(parsed.commitment_amount) : null,
+    commitment_date:          parsed.commitment_date          || null,
+    should_schedule_followup: Boolean(parsed.should_schedule_followup),
+    followup_date:            parsed.followup_date            || null,
+    should_escalate:          Boolean(parsed.should_escalate),
+    actions:                  Array.isArray(parsed.actions) ? parsed.actions : ['registrar_gestion'],
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+async function registrarGestion(folio, canal, linda) {
+  try {
+    await supabase.from('gestiones').insert({
+      plan:    folio,
+      canal,
+      estatus: 'enviado',
+      nota:    `L.I.N.D.A. · intent:${linda.intent} · resultado:${linda.management_result}${linda.should_escalate ? ' · ESCALADO' : ''}`,
+    })
+  } catch (e) { /* silencioso */ }
+}
+
+async function registrarPromesa(folio, telefono, linda) {
+  if (!linda.commitment_date) return
+  try {
+    await supabase.from('promesas').insert({
+      plan:             folio,
+      telefono,
+      canal:            'whatsapp',
+      monto:            linda.commitment_amount,
+      fecha_compromiso: linda.commitment_date,
+      estatus:          'pendiente',
+      nota:             `Capturada por L.I.N.D.A. · intent:${linda.intent}`,
+    })
+  } catch (e) { /* silencioso */ }
+}
+
+async function programarSeguimiento(folio, telefono, linda) {
+  if (!linda.should_schedule_followup || !linda.followup_date) return
+  try {
+    await supabase.from('seguimientos').insert({
+      plan:             folio,
+      telefono,
+      canal:            'whatsapp',
+      fecha_programada: linda.followup_date,
+      motivo:           `Seguimiento L.I.N.D.A. · ${linda.intent} · ${linda.management_result}`,
+      estatus:          'pendiente',
+    })
+  } catch (e) { /* silencioso */ }
+}
+
+async function guardarConversacion(folio, telefono, mensajeCliente, linda) {
+  try {
+    await supabase.from('conversaciones').insert({
+      plan:              folio,
+      telefono,
+      mensaje_cliente:   mensajeCliente,
+      respuesta_linda:   linda.reply,
+      intent:            linda.intent,
+      management_result: linda.management_result,
+      should_escalate:   linda.should_escalate,
+      raw_response:      linda,
+    })
+  } catch (e) { /* silencioso */ }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 module.exports = async function (fastify) {
 
-  /**
-   * POST /agent/process
-   * Punto de entrada principal del agente L.I.N.D.A.
-   * Recibe el mensaje del cliente, consulta la cuenta,
-   * llama a OpenAI y ejecuta todas las acciones necesarias.
-   */
   fastify.post('/process', {
     schema: {
       body: {
         type: 'object',
-        required: ['telefono', 'mensaje', 'canal'],
+        required: ['telefono', 'mensaje'],
         properties: {
-          telefono: { type: 'string' },
-          mensaje:  { type: 'string' },
-          canal:    { type: 'string', enum: ['whatsapp', 'sms', 'email'] },
-        },
-      },
+          telefono: { type: 'string', minLength: 7 },
+          mensaje:  { type: 'string', minLength: 1, maxLength: 2000 },
+          canal:    { type: 'string', default: 'whatsapp' },
+        }
+      }
     },
+    config: { rawBody: false },
   }, async (request, reply) => {
-    const { telefono, mensaje, canal } = request.body
 
-    // ── 1. Consultar cliente ──────────────────────────────────
-    const datos = await consultarCuenta(telefono)
+    const { telefono, mensaje, canal = 'whatsapp' } = request.body
+    const tel    = telefono.replace(/\D/g, '').slice(-10)
+    const inicio = Date.now()
 
-    if (!datos) {
-      return reply.status(404).send({
-        reply:   'Lo sentimos, no encontramos información asociada a este número. Comunícate al 800 de Libertad Financiera.',
-        intent:  'cliente_no_encontrado',
-        actions: [],
-      })
-    }
-
-    const contexto = construirContexto(datos)
-
-    // ── 2. Llamar a L.I.N.D.A. (OpenAI) ─────────────────────
-    let agentResponse
-    try {
-      agentResponse = await llamarLINDA(contexto, mensaje)
-    } catch (err) {
-      fastify.log.error('[LINDA] Error OpenAI:', err.message)
-      return reply.status(500).send({ error: 'Error al procesar con IA', detail: err.message })
-    }
-
-    // ── 3. Ejecutar acciones ──────────────────────────────────
-    const executed = []
+    fastify.log.info(`[L.I.N.D.A.][OpenAI] ← ${tel}: "${mensaje.slice(0, 80)}"`)
 
     try {
-      await registrarGestion({
-        cuenta_id:  contexto.cuenta_id,
-        canal,
-        mensaje_in: mensaje,
-        respuesta:  agentResponse.reply,
-        intent:     agentResponse.intent,
-        resultado:  agentResponse.management_result,
-      })
-      executed.push('registrar_gestion')
+      const { data: cuentas } = await supabase
+        .from('cuentas_cobranza')
+        .select('*')
+        .or(`telefono.ilike.%${tel}%,telefonos.ilike.%${tel}%`)
+        .eq('regularizada', false)
+        .order('dm', { ascending: false })
+        .limit(1)
 
-      if (agentResponse.commitment_amount && agentResponse.commitment_date) {
-        await registrarPromesa({
-          cuenta_id: contexto.cuenta_id,
-          monto:     agentResponse.commitment_amount,
-          fecha:     agentResponse.commitment_date,
-          canal,
+      if (!cuentas?.length) {
+        fastify.log.warn(`[L.I.N.D.A.] Sin cuenta para ${tel}`)
+        return reply.status(200).send({
+          ok:               false,
+          reply:            'Gracias por comunicarse con Libertad Servicios Financieros. Para atenderle correctamente, indíquenos su número de crédito o llame al 442 394 5911.',
+          intent:           'sin_intencion',
+          management_result:'sin_contacto',
+          should_escalate:  true,
+          actions:          ['escalar_caso'],
+          duracion_ms:      Date.now() - inicio,
         })
-        executed.push('registrar_promesa')
       }
 
-      if (agentResponse.should_schedule_followup && agentResponse.followup_date) {
-        await programarSeguimiento({
-          cuenta_id: contexto.cuenta_id,
-          fecha:     agentResponse.followup_date,
-          motivo:    agentResponse.intent,
-          canal,
-        })
-        executed.push('programar_seguimiento')
+      const cuenta      = cuentas[0]
+      const folio       = cuenta.plan || cuenta.folio
+      const telefCuenta = cuenta.telefono || tel
+
+      const [
+        { data: gestiones     },
+        { data: promesas      },
+        { data: historialConv },
+      ] = await Promise.all([
+        supabase.from('gestiones')
+          .select('canal,estatus,nota,created_at')
+          .eq('plan', folio)
+          .order('created_at', { ascending: false })
+          .limit(1),
+        supabase.from('promesas')
+          .select('monto,fecha_compromiso,estatus')
+          .eq('plan', folio)
+          .eq('estatus', 'pendiente')
+          .order('fecha_compromiso', { ascending: true }),
+        supabase.from('conversaciones')
+          .select('mensaje_cliente,respuesta_linda')
+          .eq('plan', folio)
+          .order('created_at', { ascending: false })
+          .limit(3),
+      ])
+
+      const historial = (historialConv || [])
+        .reverse()
+        .map(c => ({ cliente: c.mensaje_cliente, linda: c.respuesta_linda }))
+
+      const contexto = buildContext(cuenta, gestiones?.[0] || null, promesas || [])
+      const linda    = await callLINDA(contexto, mensaje, historial)
+
+      fastify.log.info(
+        `[L.I.N.D.A.] → intent=${linda.intent} | resultado=${linda.management_result}` +
+        `${linda.should_escalate ? ' | ⚠️ ESCALAR' : ''}` +
+        ` | ${Date.now() - inicio}ms`
+      )
+
+      await Promise.allSettled([
+        registrarGestion(folio, canal, linda),
+        registrarPromesa(folio, telefCuenta, linda),
+        programarSeguimiento(folio, telefCuenta, linda),
+        guardarConversacion(folio, telefCuenta, mensaje, linda),
+      ])
+
+      return {
+        ok:                       true,
+        plan:                     folio,
+        nombre:                   cuenta.nombre || cuenta.nombre_cliente,
+        reply:                    linda.reply,
+        intent:                   linda.intent,
+        management_result:        linda.management_result,
+        commitment_amount:        linda.commitment_amount,
+        commitment_date:          linda.commitment_date,
+        should_schedule_followup: linda.should_schedule_followup,
+        followup_date:            linda.followup_date,
+        should_escalate:          linda.should_escalate,
+        actions:                  linda.actions,
+        duracion_ms:              Date.now() - inicio,
       }
 
-      if (agentResponse.should_escalate) {
-        await escalarCaso(contexto.cuenta_id)
-        executed.push('escalar_caso')
-      }
     } catch (err) {
-      fastify.log.error('[LINDA] Error en acciones:', err.message)
-    }
-
-    return {
-      reply:                    agentResponse.reply,
-      intent:                   agentResponse.intent,
-      management_result:        agentResponse.management_result,
-      commitment_amount:        agentResponse.commitment_amount  ?? null,
-      commitment_date:          agentResponse.commitment_date    ?? null,
-      should_schedule_followup: agentResponse.should_schedule_followup ?? false,
-      followup_date:            agentResponse.followup_date      ?? null,
-      should_escalate:          agentResponse.should_escalate    ?? false,
-      actions:                  executed,
+      fastify.log.error(`[L.I.N.D.A.] Error fatal: ${err.message}`)
+      return reply.status(500).send({
+        ok:      false,
+        error:   err.message,
+        reply:   'En este momento no podemos atenderle. Por favor llame al 442 394 5911.',
+        intent:  'sin_intencion',
+        actions: ['escalar_caso'],
+      })
     }
   })
-
-  fastify.get('/health', async () => ({
-    agente:    'L.I.N.D.A.',
-    version:   '1.0.0',
-    status:    'activo',
-    timestamp: new Date().toISOString(),
-  }))
 }
