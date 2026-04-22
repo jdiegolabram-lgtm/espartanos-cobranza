@@ -36,6 +36,10 @@ app.register(require('./src/routes/email'),        { prefix: '/api/email'       
 // ── WhatsApp webhook (Meta) ──
 app.register(require('./src/routes/whatsapp'), { prefix: '/webhook/whatsapp' })
 
+// ── Capa operativa (tablero + exportables) ──
+app.register(require('./src/routes/dashboard'), { prefix: '/api/dashboard' })
+app.register(require('./src/routes/exports'),   { prefix: '/api/exports'   })
+
 // ── Health check ──
 app.get('/', async () => ({
   sistema:   'Espartanos Cobranza — Motor de Ruteo + L.I.N.D.A.',
