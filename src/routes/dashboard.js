@@ -110,29 +110,25 @@ module.exports = async function (fastify) {
   /**
    * GET /api/dashboard/debug-env
    * ENDPOINT TEMPORAL DE DIAGNÓSTICO
-   * Devuelve metadata de LINDA_OPENAI_KEY (y fallback OPENAI_API_KEY) sin exponer el valor completo.
+   * Devuelve metadata de OPENAI_API_KEY sin exponer el valor completo.
    * Uso: diagnosticar por qué OpenAI devuelve 401 a pesar de tener key fresca.
    * ELIMINAR una vez resuelto el 401.
    */
   fastify.get('/debug-env', async () => {
-    const meta = (k) => ({
-      defined:       k.length > 0,
-      length:        k.length,
-      startsWith:    k.slice(0, 12),
-      endsWith:      k.slice(-4),
-      startsProj:    k.startsWith('sk-proj-'),
-      hasLeadingWs:  k !== k.trimStart(),
-      hasTrailingWs: k !== k.trimEnd(),
-      hasInnerWs:    /\s/.test(k.slice(1, -1)),
-      sameAfterTrim: k === k.trim(),
-    })
-    const linda = process.env.LINDA_OPENAI_KEY || ''
-    const legacy = process.env.OPENAI_API_KEY || ''
+    const k = process.env.OPENAI_API_KEY || ''
     return {
-      LINDA_OPENAI_KEY: meta(linda),
-      OPENAI_API_KEY:   meta(legacy),
-      usedVariable:     linda.length > 0 ? 'LINDA_OPENAI_KEY' : (legacy.length > 0 ? 'OPENAI_API_KEY' : 'NONE'),
-      model:            process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      OPENAI_API_KEY: {
+        defined:       k.length > 0,
+        length:        k.length,
+        startsWith:    k.slice(0, 12),
+        endsWith:      k.slice(-4),
+        startsProj:    k.startsWith('sk-proj-'),
+        hasLeadingWs:  k !== k.trimStart(),
+        hasTrailingWs: k !== k.trimEnd(),
+        hasInnerWs:    /\s/.test(k.slice(1, -1)),
+        sameAfterTrim: k === k.trim(),
+      },
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     }
   })
 

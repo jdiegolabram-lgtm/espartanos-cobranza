@@ -2,14 +2,10 @@
 
 const { OpenAI } = require('openai')
 
-// Inicialización lazy: evita crash al arrancar si LINDA_OPENAI_KEY no está configurada
-// Variable renombrada para evitar conflictos con placeholders autocompletados en Railway.
+// Inicialización lazy: evita crash al arrancar si OPENAI_API_KEY no está configurada.
 let _client = null
 function getClient() {
-  if (!_client) {
-    const apiKey = process.env.LINDA_OPENAI_KEY || process.env.OPENAI_API_KEY
-    _client = new OpenAI({ apiKey })
-  }
+  if (!_client) _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   return _client
 }
 
