@@ -108,31 +108,6 @@ module.exports = async function (fastify) {
   })
 
   /**
-   * GET /api/dashboard/debug-env
-   * ENDPOINT TEMPORAL DE DIAGNÓSTICO
-   * Devuelve metadata de OPENAI_API_KEY sin exponer el valor completo.
-   * Uso: diagnosticar por qué OpenAI devuelve 401 a pesar de tener key fresca.
-   * ELIMINAR una vez resuelto el 401.
-   */
-  fastify.get('/debug-env', async () => {
-    const k = process.env.OPENAI_API_KEY || ''
-    return {
-      OPENAI_API_KEY: {
-        defined:       k.length > 0,
-        length:        k.length,
-        startsWith:    k.slice(0, 12),
-        endsWith:      k.slice(-4),
-        startsProj:    k.startsWith('sk-proj-'),
-        hasLeadingWs:  k !== k.trimStart(),
-        hasTrailingWs: k !== k.trimEnd(),
-        hasInnerWs:    /\s/.test(k.slice(1, -1)),
-        sameAfterTrim: k === k.trim(),
-      },
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    }
-  })
-
-  /**
    * POST /api/dashboard/pipeline
    * Ejecuta el pipeline maestro runLindaTrackingPipeline para una fecha.
    */
